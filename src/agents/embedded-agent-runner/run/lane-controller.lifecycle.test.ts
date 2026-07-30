@@ -48,6 +48,7 @@ function createController(options: {
   enqueue?: LaneParams["enqueue"];
   trigger?: LaneParams["trigger"];
   abortSignal?: AbortSignal;
+  attribution?: LaneParams["attribution"];
   runId?: string;
 }) {
   let lifecycleGeneration = options.lifecycleGeneration;
@@ -61,6 +62,7 @@ function createController(options: {
     timeoutMs: 30_000,
     runId: options.runId ?? "run-1",
     lifecycleGeneration,
+    attribution: options.attribution,
     trigger: options.trigger,
     enqueue: options.enqueue,
     abortSignal: options.abortSignal,
@@ -111,11 +113,19 @@ describe("createEmbeddedRunLaneController lifecycle admission", () => {
   it("rebinds foreground work that was queued before lifecycle rotation", async () => {
     const queue = deferredTaskQueue();
     const generation = getAgentEventLifecycleGeneration();
+    const attribution = createAgentExecutionAttribution({
+      runId: "queued-across-restart",
+      lifecycleGeneration: generation,
+      sessionKey: "agent:main:session-1",
+      sessionId: "session-1",
+      agentId: "main",
+    });
     const state = createController({
       lifecycleGeneration: generation,
       enqueue: queue.enqueue as LaneParams["enqueue"],
       trigger: "user",
       runId: "queued-across-restart",
+      attribution,
     });
     const run = state.controller.enqueueGlobal(async () => completedResult);
 
@@ -125,7 +135,14 @@ describe("createEmbeddedRunLaneController lifecycle admission", () => {
 
     expect(state.getLifecycleGeneration()).toBe(currentGeneration);
     expect(state.getParams().lifecycleGeneration).toBe(currentGeneration);
+    expect(state.getParams().attribution).toEqual({
+      ...attribution,
+      lifecycleGeneration: currentGeneration,
+    });
+    expect(state.getParams().attribution).not.toBe(attribution);
+    expect(Object.isFrozen(state.getParams().attribution)).toBe(true);
     expect(getAgentRunContext("queued-across-restart")).toMatchObject({
+      attribution: state.getParams().attribution,
       lifecycleGeneration: currentGeneration,
     });
   });
