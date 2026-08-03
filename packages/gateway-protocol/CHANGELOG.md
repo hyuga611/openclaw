@@ -14,6 +14,7 @@ version and the additive schema surface. Dates are authoring dates (2026).
 - Add optional `step` on `SystemAgentChatResult` carrying the full awaited wizard step.
 - Add typed `wizardCancel` input for cancelling the exact active hosted wizard step.
 - Add session-scoped, typed wizard-action history for durable structured setup receipts.
+- Add an owner-validated live session snapshot to OpenClaw chat history for browser reload recovery.
 
 ## Protocol v4 (current)
 

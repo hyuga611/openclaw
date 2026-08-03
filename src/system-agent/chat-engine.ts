@@ -775,7 +775,7 @@ export class SystemAgentChatEngine {
     return this.history.slice(index).map((turn) => ({ role: turn.role, text: turn.text }));
   }
 
-  /** Return only the sanitized live step needed to persist typed wizard actions. */
+  /** Return only the sanitized live step needed for typed actions and control recovery. */
   getActiveWizardStep(): WizardStep | null {
     const step = this.wizardBridge?.step;
     return step ? sanitizeWizardStepForClient(step) : null;

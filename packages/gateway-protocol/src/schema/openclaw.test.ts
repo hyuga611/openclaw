@@ -92,6 +92,7 @@ describe("OpenClaw chat history protocol", () => {
   it("accepts the default request and bounds explicit limits", () => {
     expect(validateSystemAgentChatHistoryParams({})).toBe(true);
     expect(validateSystemAgentChatHistoryParams({ limit: 1 })).toBe(true);
+    expect(validateSystemAgentChatHistoryParams({ sessionId: "live-session" })).toBe(true);
     expect(validateSystemAgentChatHistoryParams({ limit: 500 })).toBe(true);
     expect(validateSystemAgentChatHistoryParams({ limit: 0 })).toBe(false);
     expect(validateSystemAgentChatHistoryParams({ limit: 501 })).toBe(false);
@@ -133,6 +134,24 @@ describe("OpenClaw chat history protocol", () => {
     expect(
       Value.Check(SystemAgentChatHistoryResultSchema, {
         turns: [{ ...turn, wizardAction: { ...turn.wizardAction, kind: "unknown" } }],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts an authoritative live session snapshot with an optional wizard step", () => {
+    expect(
+      Value.Check(SystemAgentChatHistoryResultSchema, {
+        turns: [],
+        session: {
+          sessionId: "live-session",
+          step: { id: "secret", type: "text", message: "Token", sensitive: true },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(SystemAgentChatHistoryResultSchema, {
+        turns: [],
+        session: { sessionId: "live-session", step: { type: "text", message: "Token" } },
       }),
     ).toBe(false);
   });
