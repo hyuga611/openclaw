@@ -2,6 +2,7 @@
  * Prepares the attempt-local tool catalog, schema projection, and diagnostics.
  */
 import type { DiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
+import { bindToolExecutionAttribution } from "../../agent-tools.before-tool-call.attribution.js";
 import { resolveToolLoopDetectionConfig } from "../../agent-tools.js";
 import {
   CODE_MODE_EXEC_TOOL_NAME,
@@ -61,24 +62,26 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
   const { clientTools, uncompactedEffectiveTools } = input.bundleTools;
   let effectiveTools = uncompactedEffectiveTools;
   const attribution = resolveEmbeddedAttemptExecutionAttribution(attempt);
-  const catalogToolHookContext = {
-    ...(attribution ? { attribution } : {}),
-    agentId: input.sessionAgentId,
-    config: attempt.config,
-    cwd: input.effectiveCwd,
-    sessionKey: input.sandboxSessionKey,
-    sessionId: attempt.sessionId,
-    runId: attempt.runId,
-    approvalReviewerDeviceId: attempt.approvalReviewerDeviceId,
-    channelId: attempt.currentChannelId,
-    trace: input.runTrace,
-    loopDetection: resolveToolLoopDetectionConfig({
-      cfg: attempt.config,
+  const catalogToolHookContext = bindToolExecutionAttribution(
+    {
       agentId: input.sessionAgentId,
-    }),
-    onToolOutcome: attempt.onToolOutcome,
-    allocateToolOutcomeOrdinal: attempt.allocateToolOutcomeOrdinal,
-  };
+      config: attempt.config,
+      cwd: input.effectiveCwd,
+      sessionKey: input.sandboxSessionKey,
+      sessionId: attempt.sessionId,
+      runId: attempt.runId,
+      approvalReviewerDeviceId: attempt.approvalReviewerDeviceId,
+      channelId: attempt.currentChannelId,
+      trace: input.runTrace,
+      loopDetection: resolveToolLoopDetectionConfig({
+        cfg: attempt.config,
+        agentId: input.sessionAgentId,
+      }),
+      onToolOutcome: attempt.onToolOutcome,
+      allocateToolOutcomeOrdinal: attempt.allocateToolOutcomeOrdinal,
+    },
+    attribution,
+  );
   const codeModeTools = codeModeControlsEnabledForRun
     ? createCodeModeTools({
         config: attempt.config,
