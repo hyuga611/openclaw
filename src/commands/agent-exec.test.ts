@@ -12,6 +12,7 @@ import {
   loadAuthProfileStoreForRuntime,
   resolvePersistedAuthProfileOwnerAgentDir,
 } from "../agents/auth-profiles.js";
+import { createCodeModeStats } from "../agents/code-mode-stats.js";
 import {
   clearRuntimeConfigSnapshot,
   getRuntimeConfigSnapshot,
@@ -200,6 +201,33 @@ describe("agent exec strict result classification", () => {
       failures: 1,
       totalToolTimeMs: 25,
     });
+  });
+
+  it("projects Code Mode accounting", () => {
+    const codeModeStats = createCodeModeStats();
+    codeModeStats.controlCalls.exec = 2;
+    codeModeStats.bridgeCalls.callValue = 3;
+    const envelope = classifyAgentExecResult({
+      payloads: [{ text: "done" }],
+      meta: {
+        durationMs: 10,
+        agentMeta: {
+          sessionId: "session-result",
+          provider: "openai",
+          model: "gpt-5.6-sol",
+          codeModeStats,
+        },
+        executionTrace: {
+          attempts: [
+            { provider: "openai", model: "gpt-5.6-sol", result: "same_model_rate_limit" },
+            { provider: "openai", model: "gpt-5.6-sol", result: "fallback_model" },
+            { provider: "anthropic", model: "claude-opus-5", result: "success" },
+          ],
+        },
+      },
+    });
+
+    expect(envelope.codeModeStats).toEqual(codeModeStats);
   });
 });
 
