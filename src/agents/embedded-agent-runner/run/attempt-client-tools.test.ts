@@ -6,6 +6,7 @@ import {
 } from "../../../plugins/hook-runner-global.js";
 import { createMockPluginRegistry } from "../../../plugins/hooks.test-fixtures.js";
 import { createAgentExecutionAttribution } from "../../agent-execution-attribution.js";
+import { bindToolExecutionAttribution } from "../../agent-tools.before-tool-call.attribution.js";
 import type { HookContext } from "../../agent-tools.before-tool-call.js";
 import { applyCodeModeCatalog, createCodeModeTools } from "../../code-mode.js";
 import type { ExtensionContext } from "../../sessions/index.js";
@@ -159,13 +160,15 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       attemptConfig: TOOL_SEARCH_CONFIG,
       toolSearchRuntimeConfig: CATALOGS_DISABLED_CONFIG,
       catalogRef: seedCatalog("tool-search", TOOL_SEARCH_CONFIG),
-      catalogToolHookContext: {
+      catalogToolHookContext: bindToolExecutionAttribution(
+        {
+          runId: "flat-run",
+          sessionKey: "flat-session",
+          sessionId: "flat-session-id",
+          agentId: "flat-agent",
+        },
         attribution,
-        runId: "flat-run",
-        sessionKey: "flat-session",
-        sessionId: "flat-session-id",
-        agentId: "flat-agent",
-      },
+      ),
     });
     const directClientTool = result.clientToolDefs[0];
     if (!directClientTool) {
