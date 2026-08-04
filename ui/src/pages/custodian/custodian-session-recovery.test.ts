@@ -38,7 +38,14 @@ describe("custodian session recovery", () => {
       if (method === "openclaw.chat.history") {
         return params.sessionId === "reload-session"
           ? {
-              turns: [{ role: "assistant", text: "Enter the secret.", at: 1 }],
+              turns: [
+                {
+                  role: "assistant",
+                  text: "Enter the secret.",
+                  at: 1,
+                  sessionId: "reload-session",
+                },
+              ],
               session: {
                 sessionId: "reload-session",
                 step: {
@@ -113,6 +120,70 @@ describe("custodian session recovery", () => {
       sessionId: "reload-session",
       wizardCancel: { stepId: "secret" },
     });
+  });
+
+  it("rehydrates submitted answers as receipts and keeps active instructions collapsed", async () => {
+    writeCustodianSessionPointer("ws://gateway.test/control", "onboarding", "slack-session");
+    const request = vi.fn().mockResolvedValue({
+      turns: [
+        {
+          role: "assistant",
+          text: "How should OpenClaw appear in Slack?\n\n1. Slack bot\n2. Slack user",
+          at: 1,
+          sessionId: "slack-session",
+        },
+        {
+          role: "user",
+          text: "Slack bot",
+          at: 2,
+          sessionId: "slack-session",
+          wizardAction: {
+            kind: "answer",
+            step: {
+              id: "slack-mode",
+              type: "select",
+              message: "How should OpenClaw appear in Slack?",
+              options: [
+                { label: "Slack bot", value: "bot" },
+                { label: "Slack user", value: "user" },
+              ],
+            },
+          },
+        },
+        {
+          role: "assistant",
+          text: 'Slack socket mode tokens\n\n```json\n{ "features": { "bot_user": true } }\n```',
+          at: 3,
+          sessionId: "slack-session",
+        },
+      ],
+      session: {
+        sessionId: "slack-session",
+        step: {
+          id: "bot-token-source",
+          type: "select",
+          message: "How do you want to provide this Slack bot token?",
+          options: [
+            { label: "Enter Slack bot token", value: "direct" },
+            { label: "Use external secret provider", value: "secret-ref" },
+          ],
+        },
+      },
+    });
+    const { context } = createContext(request, ["openclaw.chat", "openclaw.chat.history"]);
+    const { page } = await mountPage(context);
+
+    await waitForFast(() =>
+      expect(page.querySelectorAll(".custodian__wizard-step")).toHaveLength(1),
+    );
+    expect(page.querySelectorAll(".custodian__structured-response")).toHaveLength(1);
+    expect(page.querySelectorAll(".chat-group.user")).toHaveLength(0);
+    expect(page.querySelectorAll(".chat-group.assistant")).toHaveLength(0);
+    expect(
+      [...page.querySelectorAll<HTMLDetailsElement>(".custodian__wizard-details")].every(
+        (details) => !details.open,
+      ),
+    ).toBe(true);
   });
 
   it("keeps a restored control separate from another session's transcript tail", async () => {

@@ -124,21 +124,70 @@ const SERVER_SENSITIVE_MASK = "<redacted secret>";
 export function createCustodianTranscriptMessages(
   turns: readonly SystemAgentChatHistoryTurn[],
   firstMessageId: number,
+  activeSession?: SystemAgentChatHistoryResult["session"],
 ): { messages: CustodianMessage[]; nextMessageId: number } {
   let nextMessageId = firstMessageId;
-  const messages = turns.map((turn) => ({
-    id: nextMessageId++,
-    role: turn.role,
-    text:
+  const messages: CustodianMessage[] = [];
+  for (const turn of turns) {
+    const display =
       turn.role === "user" && turn.text === SERVER_SENSITIVE_MASK
         ? t("custodian.sensitiveReply")
-        : turn.text,
-    at: turn.at,
-    question: null,
-    step: null,
-    structuredResponse: null,
-    ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
-  }));
+        : turn.text;
+    if (turn.role === "user" && turn.wizardAction) {
+      const previous = messages.at(-1);
+      const ownsPreviousPrompt =
+        previous?.role === "assistant" &&
+        turn.sessionId !== undefined &&
+        previous.sessionId === turn.sessionId;
+      const supportingText = ownsPreviousPrompt ? previous.text : "";
+      if (supportingText) {
+        messages.pop();
+      }
+      messages.push({
+        id: nextMessageId++,
+        role: "assistant",
+        text: supportingText,
+        at: turn.at,
+        question: null,
+        step: turn.wizardAction.step,
+        structuredResponse: { display, state: "submitted" },
+        ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
+      });
+      continue;
+    }
+    messages.push({
+      id: nextMessageId++,
+      role: turn.role,
+      text: display,
+      at: turn.at,
+      question: null,
+      step: null,
+      structuredResponse: null,
+      ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
+    });
+  }
+  if (activeSession?.step) {
+    const activePrompt = messages.findLast(
+      (message) =>
+        message.role === "assistant" &&
+        message.sessionId === activeSession.sessionId &&
+        message.structuredResponse === null,
+    );
+    if (activePrompt) {
+      activePrompt.step = activeSession.step;
+    } else {
+      messages.push({
+        id: nextMessageId++,
+        role: "assistant",
+        text: "",
+        at: Date.now(),
+        question: null,
+        step: activeSession.step,
+        structuredResponse: null,
+        sessionId: activeSession.sessionId,
+      });
+    }
+  }
   return { messages, nextMessageId };
 }
 

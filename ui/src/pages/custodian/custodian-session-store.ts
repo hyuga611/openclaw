@@ -536,7 +536,11 @@ export class CustodianSessionStore {
       return "continue";
     }
     const history = historyResult.history;
-    const transcript = createCustodianTranscriptMessages(history.turns, this.nextMessageId);
+    const transcript = createCustodianTranscriptMessages(
+      history.turns,
+      this.nextMessageId,
+      history.session,
+    );
     this.messages = transcript.messages;
     this.nextMessageId = transcript.nextMessageId;
     this.earlierBoundaryAfterId = this.messages.at(-1)?.id ?? null;
@@ -550,10 +554,6 @@ export class CustodianSessionStore {
         return "continue";
       }
       const step = history.session.step ?? null;
-      if (step) {
-        // The transcript is machine-wide, so its last row may belong to another session.
-        this.appendAssistant("", null, step);
-      }
       this.sensitive = step?.sensitive === true;
       this.wizardInputPending = step !== null;
       this.wizardValue = step ? initialCustodianWizardValue(step) : undefined;
