@@ -202,7 +202,7 @@ describe("audit event persistence", () => {
     expect(listAuditEvents({ database, limit: 10 }).events).toHaveLength(1);
   });
 
-  it("deduplicates equivalent generation-aware replays against a shipped legacy source key", () => {
+  it("adopts one equivalent generation-aware replay against a shipped legacy source key", () => {
     const database = createDatabaseOptions();
     const occurredAt = Date.now();
     const legacySourceId = `run-legacy:1:${occurredAt}:agent.run.started`;
@@ -212,6 +212,9 @@ describe("audit event persistence", () => {
         database,
       ),
     ).toBeDefined();
+    const { db: legacyDb } = openOpenClawStateDatabase(database);
+    legacyDb.exec("DROP TABLE audit_event_source_adoptions");
+    closeOpenClawStateDatabaseForTest();
 
     expect(
       recordAuditEvent(
@@ -227,7 +230,7 @@ describe("audit event persistence", () => {
     expect(
       recordAuditEvent(
         auditInput({
-          sourceId: `lifecycle:generation-2:${legacySourceId}`,
+          sourceId: `lifecycle:generation-1:${legacySourceId}`,
           legacySourceId,
           sourceSequence: 1,
           occurredAt,
@@ -235,6 +238,18 @@ describe("audit event persistence", () => {
         database,
       ),
     ).toBeUndefined();
+    closeOpenClawStateDatabaseForTest();
+    expect(
+      recordAuditEvent(
+        auditInput({
+          sourceId: `lifecycle:generation-2:${legacySourceId}`,
+          legacySourceId,
+          sourceSequence: 1,
+          occurredAt,
+        }),
+        database,
+      ),
+    ).toBeDefined();
 
     const { db } = openOpenClawStateDatabase(database);
     expect(
@@ -242,7 +257,13 @@ describe("audit event persistence", () => {
         .prepare("SELECT source_id FROM audit_events ORDER BY sequence")
         .all()
         .map((row) => (row as { source_id: string }).source_id),
-    ).toEqual([legacySourceId]);
+    ).toEqual([legacySourceId, `lifecycle:generation-2:${legacySourceId}`]);
+    expect(db.prepare("SELECT * FROM audit_event_source_adoptions").all()).toEqual([
+      {
+        legacy_source_id: legacySourceId,
+        adopted_source_id: `lifecycle:generation-1:${legacySourceId}`,
+      },
+    ]);
   });
 
   it("rejects persisted run lifecycle tuples outside the closed contract", () => {

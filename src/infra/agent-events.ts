@@ -283,6 +283,55 @@ function enrichAgentEvent(
   return enriched;
 }
 
+function enrichOwnedStaleAgentAuditEvent(
+  event: Omit<AgentEventPayload, "seq" | "ts">,
+): AgentEventPayload | undefined {
+  if (
+    event.stream !== "lifecycle" ||
+    (event.data.phase !== "start" && event.data.phase !== "end" && event.data.phase !== "error")
+  ) {
+    return undefined;
+  }
+  const state = getAgentEventState();
+  const inheritedLifecycleGeneration = getAgentRunExecutionLifecycleGeneration();
+  const lifecycleGeneration = event.lifecycleGeneration ?? inheritedLifecycleGeneration;
+  const currentLifecycleGeneration = getAgentRunLifecycleGeneration();
+  if (!lifecycleGeneration || lifecycleGeneration === currentLifecycleGeneration) {
+    return undefined;
+  }
+  const context = getAgentRunContext(event.runId);
+  if (
+    (context && context.lifecycleGeneration !== lifecycleGeneration) ||
+    (!context && inheritedLifecycleGeneration !== lifecycleGeneration) ||
+    hasInvalidLifecycleStartTimestamp(event.stream, event.data)
+  ) {
+    return undefined;
+  }
+  const nextSeq = (state.seqByRun.get(event.runId) ?? 0) + 1;
+  state.seqByRun.set(event.runId, nextSeq);
+  const sessionKey =
+    (typeof event.sessionKey === "string" && event.sessionKey.trim()
+      ? event.sessionKey
+      : undefined) ?? context?.sessionKey;
+  const sessionId = event.sessionId ?? context?.sessionId;
+  const agentId = event.agentId ?? context?.agentId;
+  const enriched: AgentEventPayload = {
+    ...event,
+    ...(sessionKey ? { sessionKey } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(agentId ? { agentId } : {}),
+    seq: nextSeq,
+    ts: Date.now(),
+  };
+  // This route is audit-only: a still-owned pre-rotation execution may finish
+  // its durable ordering, but stale lifecycle never reaches public listeners.
+  Object.defineProperty(enriched, "lifecycleGeneration", {
+    value: lifecycleGeneration,
+    enumerable: false,
+  });
+  return enriched;
+}
+
 /** Emits an event only when its run ownership is still current. */
 export function emitAgentEventIfCurrent(event: Omit<AgentEventPayload, "seq" | "ts">): boolean {
   const enriched = enrichAgentEvent(event);
@@ -311,7 +360,7 @@ export function emitAgentEventForOwner(
 /** Emits run metadata only to the Gateway-owned durable audit projection. */
 export function emitAgentAuditEvent(event: Omit<AgentEventPayload, "seq" | "ts">) {
   const state = getAgentEventState();
-  const enriched = enrichAgentEvent(event);
+  const enriched = enrichAgentEvent(event) ?? enrichOwnedStaleAgentAuditEvent(event);
   if (enriched) {
     const attribution = getAgentRunContext(event.runId)?.attribution;
     const matchingAttribution =

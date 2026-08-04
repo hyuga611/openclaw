@@ -9,6 +9,7 @@ import {
   onAgentEvent,
   resetAgentEventsForTest,
   rotateAgentEventLifecycleGeneration,
+  withAgentRunLifecycleGeneration,
 } from "./agent-events.js";
 import { onAgentRunContextRetired } from "./agent-run-context-retirement.js";
 import {
@@ -133,6 +134,52 @@ describe("agent event execution attribution", () => {
       sessionId: "session-new",
       agentId: "new",
     });
+  });
+
+  test("delivers an owned pre-rotation retry only to the private audit bus", () => {
+    const attribution = createAgentExecutionAttribution({
+      runId: "run-stale-audit-retry",
+      lifecycleGeneration: getAgentEventLifecycleGeneration(),
+      sessionKey: "agent:main:admitted",
+      sessionId: "session-admitted",
+      agentId: "main",
+    });
+    registerAgentRunContext(attribution.runId, {
+      attribution,
+      lifecycleGeneration: attribution.lifecycleGeneration,
+    });
+    const audit: AgentEventPayload[] = [];
+    const shared: AgentEventPayload[] = [];
+    const stopAudit = onAgentAuditEvent((event) => audit.push(event));
+    const stopShared = onAgentEvent((event) => shared.push(event));
+
+    withAgentRunLifecycleGeneration(attribution.lifecycleGeneration, () => {
+      emitAgentAuditEvent({
+        runId: attribution.runId,
+        stream: "lifecycle",
+        data: { phase: "start", startedAt: 1_000 },
+      });
+    });
+    rotateAgentEventLifecycleGeneration();
+    withAgentRunLifecycleGeneration(attribution.lifecycleGeneration, () => {
+      emitAgentAuditEvent({
+        runId: attribution.runId,
+        stream: "lifecycle",
+        data: { phase: "start", startedAt: 1_000 },
+      });
+    });
+    stopAudit();
+    stopShared();
+
+    expect(shared).toEqual([]);
+    expect(audit.map((event) => event.seq)).toEqual([1, 2]);
+    expect(audit[1]).toMatchObject({
+      runId: attribution.runId,
+      sessionKey: attribution.sessionKey,
+      sessionId: attribution.sessionId,
+      agentId: attribution.agentId,
+    });
+    expect(audit[1]?.lifecycleGeneration).toBe(attribution.lifecycleGeneration);
   });
 
   test("notifies internal projections when run contexts retire", () => {
