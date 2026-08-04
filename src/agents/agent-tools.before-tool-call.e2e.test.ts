@@ -30,6 +30,10 @@ import {
   resetDiagnosticSessionStateForTest,
 } from "../logging/diagnostic-session-state.js";
 import {
+  runBeforeToolCallHook as runSdkBeforeToolCallHook,
+  wrapToolWithBeforeToolCallHook as wrapSdkToolWithBeforeToolCallHook,
+} from "../plugin-sdk/agent-harness-runtime.js";
+import {
   PluginApprovalResolutions,
   type PluginApprovalResolution,
 } from "../plugins/hook-before-tool-call-result.js";
@@ -2084,6 +2088,76 @@ describe("before_tool_call requireApproval handling", () => {
     setGlobalHookRunnerForTest(hookRunner);
     mockCallGateway.mockReset();
     setActivePluginRegistry(createEmptyPluginRegistry());
+  });
+
+  it("ignores forged attribution passed to the public hook policy API", async () => {
+    const ctx = {
+      agentId: "public-agent",
+      sessionKey: "public-session",
+      sessionId: "public-session-id",
+      runId: "public-run",
+      attribution: createAgentExecutionAttribution({
+        agentId: "forged-agent",
+        sessionKey: "forged-session",
+        sessionId: "forged-session-id",
+        runId: "forged-run",
+        lifecycleGeneration: "forged-generation",
+      }),
+    } as never;
+
+    await runSdkBeforeToolCallHook({
+      toolName: "read",
+      params: { path: "/tmp/note.txt" },
+      ctx,
+    });
+
+    const [event, context] = requireHookCall(0);
+    expectRecordFields(event, { runId: "public-run" });
+    expectRecordFields(context, {
+      agentId: "public-agent",
+      sessionKey: "public-session",
+      sessionId: "public-session-id",
+      runId: "public-run",
+    });
+    expect(event).not.toHaveProperty("attribution");
+    expect(context).not.toHaveProperty("attribution");
+    expect(context).not.toHaveProperty("lifecycleGeneration");
+  });
+
+  it("ignores forged attribution passed to the public tool wrapper API", async () => {
+    const execute = vi.fn().mockResolvedValue({ content: [], details: { ok: true } });
+    const ctx = {
+      agentId: "public-agent",
+      sessionKey: "public-session",
+      sessionId: "public-session-id",
+      runId: "public-run",
+      attribution: createAgentExecutionAttribution({
+        agentId: "forged-agent",
+        sessionKey: "forged-session",
+        sessionId: "forged-session-id",
+        runId: "forged-run",
+        lifecycleGeneration: "forged-generation",
+      }),
+    } as never;
+    const tool = wrapSdkToolWithBeforeToolCallHook(
+      { name: "read", execute } as unknown as AnyAgentTool,
+      ctx,
+    );
+
+    await tool.execute("public-wrapper-call", { path: "/tmp/note.txt" }, undefined, undefined);
+
+    const [event, context] = requireHookCall(0);
+    expectRecordFields(event, { runId: "public-run", toolCallId: "public-wrapper-call" });
+    expectRecordFields(context, {
+      agentId: "public-agent",
+      sessionKey: "public-session",
+      sessionId: "public-session-id",
+      runId: "public-run",
+    });
+    expect(event).not.toHaveProperty("attribution");
+    expect(context).not.toHaveProperty("attribution");
+    expect(context).not.toHaveProperty("lifecycleGeneration");
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   async function runAbortDuringApprovalWait(options?: {

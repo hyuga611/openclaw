@@ -80,25 +80,22 @@ type BeforeToolCallWrapperOptions = {
 type ForwardedToolExecution = (...args: unknown[]) => ReturnType<AnyAgentTool["execute"]>;
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
 
-function buildToolPreparationHookContext(ctx: HookContext): Omit<HookContext, "attribution"> {
-  if (!ctx.attribution) {
-    const { attribution: _hostAttribution, ...toolHookContext } = ctx;
-    return toolHookContext;
-  }
+function buildToolPreparationHookContext(ctx: HookContext): HookContext {
+  const correlation = resolveToolExecutionCorrelation(ctx);
   const {
-    attribution,
+    attribution: _untrustedAttribution,
     agentId: _flatAgentId,
     sessionKey: _flatSessionKey,
     sessionId: _flatSessionId,
     runId: _flatRunId,
     ...toolHookContext
-  } = ctx;
+  } = ctx as HookContext & { attribution?: unknown };
   return {
     ...toolHookContext,
-    runId: attribution.runId,
-    ...(attribution.agentId ? { agentId: attribution.agentId } : {}),
-    ...(attribution.sessionKey ? { sessionKey: attribution.sessionKey } : {}),
-    ...(attribution.sessionId ? { sessionId: attribution.sessionId } : {}),
+    ...(correlation.runId ? { runId: correlation.runId } : {}),
+    ...(correlation.agentId ? { agentId: correlation.agentId } : {}),
+    ...(correlation.sessionKey ? { sessionKey: correlation.sessionKey } : {}),
+    ...(correlation.sessionId ? { sessionId: correlation.sessionId } : {}),
   };
 }
 

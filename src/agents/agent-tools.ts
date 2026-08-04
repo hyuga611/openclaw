@@ -33,6 +33,7 @@ import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import type { AgentExecutionAttribution } from "./agent-execution-attribution.js";
 import { wrapToolWithAbortSignal } from "./agent-tools.abort.js";
+import { bindToolExecutionAttribution } from "./agent-tools.before-tool-call.attribution.js";
 import {
   isToolWrappedWithBeforeToolCallHook,
   rewrapToolWithBeforeToolCallHook,
@@ -1000,7 +1001,9 @@ export function createOpenClawCodingToolsInternal(
             agentSessionKey: options?.sessionKey,
             runId: options?.runId,
             ...(options?.attribution
-              ? { beforeToolCallHookContext: { attribution: options.attribution } }
+              ? {
+                  beforeToolCallHookContext: bindToolExecutionAttribution({}, options.attribution),
+                }
               : {}),
             runSessionKey: options?.runSessionKey,
             agentChannel: resolveGatewayMessageChannel(
@@ -1205,33 +1208,35 @@ export function createOpenClawCodingToolsInternal(
     ...(options?.memberRoleIds?.length ? { roleIds: [...options.memberRoleIds] } : {}),
   } satisfies PluginHookToolRequesterContext;
   const hasRequester = Object.keys(requester).length > 0;
-  const hookContext = {
-    ...(options?.attribution ? { attribution: options.attribution } : {}),
-    agentId,
-    ...(options?.config ? { config: options.config } : {}),
-    cwd: codingRoot,
-    workspaceDir: workspaceRoot,
-    ...(options?.skillsSnapshot ? { skillsSnapshot: options.skillsSnapshot } : {}),
-    ...(options?.skillUsagePaths ? { skillUsagePaths: options.skillUsagePaths } : {}),
-    ...(sandboxRoot && allowWorkspaceWrites
-      ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
-      : {}),
-    sessionKey: options?.sessionKey,
-    sessionId: options?.sessionId,
-    runId: options?.runId,
-    trigger: options?.trigger,
-    approvalReviewerDeviceId: options?.approvalReviewerDeviceId,
-    channelId: options?.hookChannelId ?? options?.currentChannelId,
-    ...(hasRequester ? { requester } : {}),
-    ...(turnSourceChannel ? { turnSourceChannel } : {}),
-    ...(turnSourceTo ? { turnSourceTo } : {}),
-    ...(options?.agentAccountId ? { turnSourceAccountId: options.agentAccountId } : {}),
-    ...(options?.currentThreadTs ? { turnSourceThreadId: options.currentThreadTs } : {}),
-    ...(options?.trace ? { trace: options.trace } : {}),
-    loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
-    onToolOutcome: options?.onToolOutcome,
-    allocateToolOutcomeOrdinal: options?.allocateToolOutcomeOrdinal,
-  };
+  const hookContext = bindToolExecutionAttribution(
+    {
+      agentId,
+      ...(options?.config ? { config: options.config } : {}),
+      cwd: codingRoot,
+      workspaceDir: workspaceRoot,
+      ...(options?.skillsSnapshot ? { skillsSnapshot: options.skillsSnapshot } : {}),
+      ...(options?.skillUsagePaths ? { skillUsagePaths: options.skillUsagePaths } : {}),
+      ...(sandboxRoot && allowWorkspaceWrites
+        ? { sandbox: { root: sandboxRoot, bridge: sandboxFsBridge! } }
+        : {}),
+      sessionKey: options?.sessionKey,
+      sessionId: options?.sessionId,
+      runId: options?.runId,
+      trigger: options?.trigger,
+      approvalReviewerDeviceId: options?.approvalReviewerDeviceId,
+      channelId: options?.hookChannelId ?? options?.currentChannelId,
+      ...(hasRequester ? { requester } : {}),
+      ...(turnSourceChannel ? { turnSourceChannel } : {}),
+      ...(turnSourceTo ? { turnSourceTo } : {}),
+      ...(options?.agentAccountId ? { turnSourceAccountId: options.agentAccountId } : {}),
+      ...(options?.currentThreadTs ? { turnSourceThreadId: options.currentThreadTs } : {}),
+      ...(options?.trace ? { trace: options.trace } : {}),
+      loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+      onToolOutcome: options?.onToolOutcome,
+      allocateToolOutcomeOrdinal: options?.allocateToolOutcomeOrdinal,
+    },
+    options?.attribution,
+  );
   const hookOptions = {
     emitDiagnostics: options?.emitBeforeToolCallDiagnostics,
     ...(options?.swarmCollector ? { approvalMode: "deny" as const } : {}),

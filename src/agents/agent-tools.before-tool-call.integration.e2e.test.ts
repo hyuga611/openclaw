@@ -37,6 +37,7 @@ import * as clientVoiceSession from "../talk/client-voice-session.js";
 import { createAgentExecutionAttribution } from "./agent-execution-attribution.js";
 import { toClientToolDefinitions, toToolDefinitions } from "./agent-tool-definition-adapter.js";
 import { wrapToolWithAbortSignal } from "./agent-tools.abort.js";
+import { bindToolExecutionAttribution } from "./agent-tools.before-tool-call.attribution.js";
 import {
   consumeAdjustedParamsForToolCall,
   consumePreExecutionBlockedToolCall,
@@ -1676,19 +1677,21 @@ describe("before_tool_call adapter and client tool integration", () => {
         prepareBeforeToolCallParams,
         finalizeBeforeToolCallParams,
       } as unknown as AnyAgentTool;
-      const hookContext = {
-        attribution: createAgentExecutionAttribution({
+      const hookContext = bindToolExecutionAttribution(
+        {
+          runId: "run-flat-forged",
+          agentId: "flat-forged",
+          sessionKey: "agent:flat:forged",
+          sessionId: "session-flat-forged",
+        },
+        createAgentExecutionAttribution({
           runId,
           lifecycleGeneration: "generation-private",
           agentId: "main",
           sessionKey: "agent:main:voice",
           sessionId: "session-voice",
         }),
-        runId: "run-flat-forged",
-        agentId: "flat-forged",
-        sessionKey: "agent:flat:forged",
-        sessionId: "session-flat-forged",
-      };
+      );
       const tool =
         pathKind === "wrapped"
           ? wrapToolWithBeforeToolCallHook(sourceTool, hookContext)
