@@ -12,13 +12,11 @@ type ToolExecutionCorrelation = Readonly<{
  * only for legacy/internal callers that have not entered the run lifecycle.
  */
 export function resolveToolExecutionCorrelation(ctx?: HookContext): ToolExecutionCorrelation {
-  if (ctx?.attribution) {
-    return ctx.attribution;
-  }
+  const correlation = ctx?.attribution ?? ctx;
   return {
-    ...(ctx?.agentId ? { agentId: ctx.agentId } : {}),
-    ...(ctx?.sessionKey ? { sessionKey: ctx.sessionKey } : {}),
-    ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
-    ...(ctx?.runId ? { runId: ctx.runId } : {}),
+    ...(correlation?.agentId ? { agentId: correlation.agentId } : {}),
+    ...(correlation?.sessionKey ? { sessionKey: correlation.sessionKey } : {}),
+    ...(correlation?.sessionId ? { sessionId: correlation.sessionId } : {}),
+    ...(correlation?.runId ? { runId: correlation.runId } : {}),
   };
 }
