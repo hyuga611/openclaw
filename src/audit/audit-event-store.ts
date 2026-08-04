@@ -15,6 +15,11 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
 import {
+  adoptsEquivalentLegacyAuditEvent,
+  ensureAuditEventSourceAdoptionSchema,
+  pruneAuditEventSourceAdoptions,
+} from "./audit-event-source-adoption.js";
+import {
   AUDIT_EVENT_SCHEMA_VERSION,
   AUDIT_INBOUND_MESSAGE_COMPLETED_REASONS,
   AUDIT_INBOUND_MESSAGE_SKIPPED_REASONS,
@@ -36,10 +41,7 @@ import {
 } from "./audit-identity.js";
 
 type AuditEventsTable = OpenClawStateKyselyDatabase["audit_events"];
-type AuditDatabase = Pick<
-  OpenClawStateKyselyDatabase,
-  "audit_events" | "audit_event_source_adoptions"
->;
+type AuditDatabase = Pick<OpenClawStateKyselyDatabase, "audit_events">;
 type AuditEventRow = Selectable<AuditEventsTable>;
 
 const AUDIT_EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -48,53 +50,9 @@ const AUDIT_EVENT_PRUNE_BATCH_ROWS = 1_024;
 // The single audit writer owns one DB handle. Invalidate on out-of-band
 // maintenance or rollback so the hot path avoids a 100k-row scan per message.
 const auditEventRowCounts = new WeakMap<DatabaseSync, number>();
-const auditSourceAdoptionSchemaEnsured = new WeakSet<DatabaseSync>();
 
 function getAuditKysely(db: DatabaseSync) {
   return getNodeSqliteKysely<AuditDatabase>(db);
-}
-
-function pruneOrphanedAuditSourceAdoptions(db: DatabaseSync): void {
-  const kysely = getAuditKysely(db);
-  executeSqliteQuerySync(
-    db,
-    kysely
-      .deleteFrom("audit_event_source_adoptions")
-      .where(({ exists, not, selectFrom }) =>
-        not(
-          exists(
-            selectFrom("audit_events")
-              .select("sequence")
-              .whereRef(
-                "audit_events.source_id",
-                "=",
-                "audit_event_source_adoptions.legacy_source_id",
-              ),
-          ),
-        ),
-      ),
-  );
-}
-
-function ensureAuditSourceAdoptionSchema(options: OpenClawStateDatabaseOptions): void {
-  const database = openOpenClawStateDatabase(options);
-  if (auditSourceAdoptionSchemaEnsured.has(database.db)) {
-    return;
-  }
-  runOpenClawStateWriteTransaction(
-    ({ db }) => {
-      db.exec(/* sqlite-allow-raw -- Feature-local additive schema DDL; rows use Kysely. */ `
-        CREATE TABLE IF NOT EXISTS audit_event_source_adoptions (
-          legacy_source_id TEXT NOT NULL PRIMARY KEY,
-          adopted_source_id TEXT NOT NULL
-        ) STRICT
-      `);
-      pruneOrphanedAuditSourceAdoptions(db);
-    },
-    options,
-    { operationLabel: "audit-event-source-adoptions.schema.ensure" },
-  );
-  auditSourceAdoptionSchemaEnsured.add(database.db);
 }
 
 const RUN_ACTIONS = ["agent.run.started", "agent.run.finished"] as const;
@@ -598,8 +556,8 @@ function pruneAuditEventsAfterInsert(
       : Math.max(0, cachedCount + 1 - Number(expired.numAffectedRows ?? 0n));
   if (rowCount <= limits.maxRows) {
     auditEventRowCounts.set(db, rowCount);
-    if (auditSourceAdoptionSchemaEnsured.has(db) && expired.numAffectedRows) {
-      pruneOrphanedAuditSourceAdoptions(db);
+    if (expired.numAffectedRows) {
+      pruneAuditEventSourceAdoptions(db);
     }
     return;
   }
@@ -622,79 +580,7 @@ function pruneAuditEventsAfterInsert(
     rowCount = Math.max(0, rowCount - Number(pruned.numAffectedRows ?? 0n));
   }
   auditEventRowCounts.set(db, rowCount);
-  if (auditSourceAdoptionSchemaEnsured.has(db)) {
-    pruneOrphanedAuditSourceAdoptions(db);
-  }
-}
-
-function adoptsEquivalentLegacyAuditEvent(db: DatabaseSync, input: AuditEventInput): boolean {
-  if (input.kind === "message") {
-    return false;
-  }
-  const legacySourceId = input.legacySourceId;
-  if (!legacySourceId || legacySourceId === input.sourceId) {
-    return false;
-  }
-  const legacy = executeSqliteQueryTakeFirstSync(
-    db,
-    getAuditKysely(db)
-      .selectFrom("audit_events")
-      .selectAll()
-      .where("source_id", "=", legacySourceId)
-      .limit(1),
-  );
-  if (!legacy) {
-    return false;
-  }
-  const equivalent =
-    normalizeSqliteNumber(legacy.source_sequence) === input.sourceSequence &&
-    normalizeSqliteNumber(legacy.occurred_at) === input.occurredAt &&
-    legacy.kind === input.kind &&
-    legacy.action === input.action &&
-    legacy.status === input.status &&
-    legacy.error_code === (input.errorCode ?? null) &&
-    legacy.actor_type === input.actorType &&
-    legacy.actor_id === input.actorId &&
-    legacy.agent_id === input.agentId &&
-    legacy.session_key === (input.sessionKey ?? null) &&
-    legacy.session_id === (input.sessionId ?? null) &&
-    legacy.run_id === input.runId &&
-    legacy.tool_call_id === (input.kind === "tool_action" ? (input.toolCallId ?? null) : null) &&
-    legacy.tool_name === (input.kind === "tool_action" ? input.toolName : null);
-  if (!equivalent) {
-    return false;
-  }
-  const kysely = getAuditKysely(db);
-  const existing = executeSqliteQueryTakeFirstSync(
-    db,
-    kysely
-      .selectFrom("audit_event_source_adoptions")
-      .select("adopted_source_id")
-      .where("legacy_source_id", "=", legacySourceId)
-      .limit(1),
-  );
-  if (existing) {
-    return existing.adopted_source_id === input.sourceId;
-  }
-  const adopted = executeSqliteQuerySync(
-    db,
-    kysely
-      .insertInto("audit_event_source_adoptions")
-      .values({ legacy_source_id: legacySourceId, adopted_source_id: input.sourceId })
-      .onConflict((conflict) => conflict.column("legacy_source_id").doNothing()),
-  );
-  if (Number(adopted.numAffectedRows ?? 0n) > 0) {
-    return true;
-  }
-  const raced = executeSqliteQueryTakeFirstSync(
-    db,
-    kysely
-      .selectFrom("audit_event_source_adoptions")
-      .select("adopted_source_id")
-      .where("legacy_source_id", "=", legacySourceId)
-      .limit(1),
-  );
-  return raced?.adopted_source_id === input.sourceId;
+  pruneAuditEventSourceAdoptions(db);
 }
 
 /** Persist one projected event idempotently and prune fixed retention bounds. */
@@ -703,7 +589,7 @@ export function recordAuditEvent(
   options: OpenClawStateDatabaseOptions = {},
 ): AuditEventRecord | undefined {
   if (input.kind !== "message" && input.legacySourceId) {
-    ensureAuditSourceAdoptionSchema(options);
+    ensureAuditEventSourceAdoptionSchema(options);
   }
   let countCacheDatabase: DatabaseSync | undefined;
   try {
@@ -821,9 +707,7 @@ export function pruneExpiredAuditEvents(
         .deleteFrom("audit_events")
         .where("occurred_at", "<", (params.now ?? Date.now()) - AUDIT_EVENT_RETENTION_MS),
     );
-    if (auditSourceAdoptionSchemaEnsured.has(db)) {
-      pruneOrphanedAuditSourceAdoptions(db);
-    }
+    pruneAuditEventSourceAdoptions(db);
     auditEventRowCounts.delete(db);
   }, params.database);
 }
