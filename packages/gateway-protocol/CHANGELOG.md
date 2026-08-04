@@ -13,6 +13,7 @@ version and the additive schema surface. Dates are authoring dates (2026).
 - Remove dead protocol surfaces and add since-vintage metadata to retained schemas and methods.
 - Add optional `step` on `SystemAgentChatResult` carrying the full awaited wizard step.
 - Add typed `wizardCancel` input for cancelling the exact active hosted wizard step.
+- Add session-scoped, typed wizard-action history for durable structured setup receipts.
 
 ## Protocol v4 (current)
 

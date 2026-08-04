@@ -50,16 +50,12 @@ describe("custodian page", () => {
 
     await waitForFast(() => expect(request).toHaveBeenCalledOnce());
     await page.updateComplete;
-    const assistantGroup = page.querySelector<HTMLElement>(".chat-group.assistant")!;
-    expect(assistantGroup.querySelector("strong")?.textContent).toBe("aboard");
-    expect(
-      assistantGroup
-        .querySelector<HTMLImageElement>("img.chat-avatar.assistant")
-        ?.getAttribute("src"),
-    ).toBe("/favicon.svg");
+    expect(page.querySelector(".chat-group.assistant")).toBeNull();
+    expect(page.textContent).not.toContain("Welcome aboard.");
     expect(page.querySelector(".custodian__mark openclaw-mascot")).not.toBeNull();
     const card = page.querySelector("openclaw-option-card")!;
     await card.updateComplete;
+    expect(card.textContent).toContain("What would you like to do first?");
     expect(page.querySelector(".option-card__choice--recommended")?.textContent).toContain(
       "Talk to my agent",
     );
@@ -75,9 +71,11 @@ describe("custodian page", () => {
       welcomeVariant: "onboarding",
       message: "connect whatsapp",
     });
-    const userGroup = page.querySelector<HTMLElement>(".chat-group.user")!;
-    expect(userGroup.textContent).toContain("Connect WhatsApp");
-    expect(connectOption.disabled).toBe(true);
+    expect(page.querySelector(".chat-group.user")).toBeNull();
+    expect(page.querySelector("openclaw-option-card")).toBeNull();
+    expect(page.querySelector(".custodian__structured-response")?.textContent).toContain(
+      "Connect WhatsApp",
+    );
   });
 
   it("renders and answers rich select, multiselect, and sensitive text wizard steps", async () => {
@@ -138,6 +136,7 @@ describe("custodian page", () => {
     await waitForFast(() =>
       expect(page.querySelectorAll('.custodian__wizard-step input[type="radio"]')).toHaveLength(5),
     );
+    expect(page.querySelector(".chat-group.assistant")).toBeNull();
     expect(page.querySelector(".custodian__wizard-cancel")).not.toBeNull();
     expect(page.querySelector("openclaw-option-card")).toBeNull();
     expect(page.querySelector(".agent-chat__composer-shell")).toBeNull();
@@ -158,6 +157,9 @@ describe("custodian page", () => {
       wizardAnswer: { stepId: "channel", value: "twitch" },
     });
     expect(request.mock.calls[1]?.[1]).not.toHaveProperty("message");
+    expect(page.querySelector(".chat-group.user")).toBeNull();
+    expect(page.querySelectorAll(".custodian__structured-response")).toHaveLength(1);
+    expect(page.querySelector(".custodian__structured-response")?.textContent).toContain("Twitch");
     page
       .querySelectorAll<HTMLInputElement>('.custodian__wizard-step input[type="checkbox"]')[0]!
       .click();
@@ -170,7 +172,9 @@ describe("custodian page", () => {
 
     await waitForFast(() => expect(request).toHaveBeenCalledTimes(3));
     const secretInput = await waitForFast(() => {
-      const input = page.querySelector<HTMLInputElement>("#custodian-wizard-input-5");
+      const input = page.querySelector<HTMLInputElement>(
+        '.custodian__wizard-step input[name="wizard-text"]',
+      );
       expect(input).not.toBeNull();
       return input!;
     });
@@ -185,7 +189,9 @@ describe("custodian page", () => {
     expect(revealSecret).not.toBeNull();
     revealSecret!.click();
     await page.updateComplete;
-    const revealedInput = page.querySelector<HTMLInputElement>("#custodian-wizard-input-5")!;
+    const revealedInput = page.querySelector<HTMLInputElement>(
+      '.custodian__wizard-step input[name="wizard-text"]',
+    )!;
     expect(revealedInput.type).toBe("text");
     revealedInput.value = "fake-client-secret";
     revealedInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -201,8 +207,50 @@ describe("custodian page", () => {
     expect(page.textContent).toContain("Twitch");
     expect(page.textContent).toContain("Chat, Announcements");
     expect(page.textContent).toContain("Sensitive reply sent");
+    expect(page.querySelectorAll(".custodian__structured-response")).toHaveLength(3);
+    expect(page.querySelector(".chat-group.user")).toBeNull();
     expect(page.textContent).not.toContain("fake-client-secret");
     expect(page.querySelector(".agent-chat__composer-shell")).not.toBeNull();
+  });
+
+  it("collapses verbose text fallback while a rich wizard step is active", async () => {
+    const request = vi.fn().mockResolvedValue({
+      sessionId: "verbose-wizard-session",
+      reply: [
+        "## Slack socket mode tokens",
+        "1. Create a Slack app.",
+        "2. Add Socket Mode.",
+        "```json",
+        '{"display_information":{"name":"OpenClaw"}}',
+        "```",
+        "How do you want to provide this Slack bot token?",
+        "1. Enter Slack bot token",
+        "2. Use external secret provider",
+      ].join("\n"),
+      action: "none",
+      wizardInputPending: true,
+      step: {
+        id: "slack-token-source",
+        type: "select",
+        message: "How do you want to provide this Slack bot token?",
+        options: [
+          { label: "Enter Slack bot token", value: "direct" },
+          { label: "Use external secret provider", value: "secret-ref" },
+        ],
+      },
+    });
+    const { context } = createContext(request);
+    const { page } = await mountPage(context);
+
+    await waitForFast(() =>
+      expect(page.querySelectorAll('.custodian__wizard-step input[type="radio"]')).toHaveLength(2),
+    );
+    const details = page.querySelector<HTMLDetailsElement>(".custodian__wizard-details");
+    expect(details).not.toBeNull();
+    expect(details!.open).toBe(false);
+    expect(details!.querySelector("summary")?.textContent).toContain("Setup instructions");
+    expect(details!.textContent).toContain("Slack socket mode tokens");
+    expect(page.querySelector(".chat-group.assistant")).toBeNull();
   });
 
   it("cancels the exact active wizard through the typed control", async () => {
@@ -242,6 +290,9 @@ describe("custodian page", () => {
       wizardCancel: { stepId: "secret" },
     });
     await waitForFast(() => expect(page.querySelector(".custodian__wizard-step")).toBeNull());
+    expect(page.querySelectorAll(".custodian__structured-response")).toHaveLength(1);
+    expect(page.querySelector(".chat-group.user")).toBeNull();
+    expect(page.textContent).toContain("Cancel");
     expect(page.textContent).toContain("Twitch setup cancelled");
     expect(page.textContent).not.toContain("fake-client-secret");
   });
@@ -533,7 +584,8 @@ describe("custodian page", () => {
       "openclaw.chat",
     ]);
     expect(page.querySelector("openclaw-option-card")).not.toBeNull();
-    expect(page.textContent).toContain("Choose the next step.");
+    expect(page.textContent).toContain("What should happen next?");
+    expect(page.textContent).not.toContain("Choose the next step.");
   });
 
   it("requests a fresh welcome when a connected client is replaced mid-request", async () => {
@@ -760,7 +812,10 @@ describe("custodian page", () => {
     await waitForFast(() => expect(request).toHaveBeenCalledTimes(2));
     await page.updateComplete;
     expect(request.mock.calls[1]?.[1]).toMatchObject({ message: "cancel" });
-    expect(page.querySelector(".chat-group.user")?.textContent).toContain("Skip for now");
+    expect(page.querySelector(".chat-group.user")).toBeNull();
+    expect(page.querySelector(".custodian__structured-response")?.textContent).toContain(
+      "Skip for now",
+    );
     await waitForFast(() => expect(page.querySelector("openclaw-option-card")).toBeNull());
   });
 

@@ -110,10 +110,20 @@ export const SystemAgentChatHistoryParamsSchema = closedObject({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, default: 100 })),
 });
 
+export const SystemAgentChatHistoryWizardActionSchema = closedObject({
+  kind: Type.Union([Type.Literal("answer"), Type.Literal("cancel")]),
+  /** Sanitized server-owned step the submitted control answered. */
+  step: WizardStepSchema,
+});
+
 export const SystemAgentChatHistoryTurnSchema = closedObject({
   role: Type.Union([Type.Literal("user"), Type.Literal("assistant")]),
   text: Type.String(),
   at: Type.Number(),
+  /** Session that produced this turn; older transcript rows may omit it. */
+  sessionId: Type.Optional(NonEmptyString),
+  /** Present only for accepted typed wizard controls; prose clients remain plain turns. */
+  wizardAction: Type.Optional(SystemAgentChatHistoryWizardActionSchema),
 });
 
 export const SystemAgentChatHistoryResultSchema = closedObject({
@@ -369,6 +379,9 @@ export type SystemAgentChatParams = Static<typeof SystemAgentChatParamsSchema>;
 export type SystemAgentChatQuestion = Static<typeof SystemAgentChatQuestionSchema>;
 export type SystemAgentChatResult = Static<typeof SystemAgentChatResultSchema>;
 export type SystemAgentChatHistoryParams = Static<typeof SystemAgentChatHistoryParamsSchema>;
+export type SystemAgentChatHistoryWizardAction = Static<
+  typeof SystemAgentChatHistoryWizardActionSchema
+>;
 export type SystemAgentChatHistoryTurn = Static<typeof SystemAgentChatHistoryTurnSchema>;
 export type SystemAgentChatHistoryResult = Static<typeof SystemAgentChatHistoryResultSchema>;
 export type SystemChangeEntry = Static<typeof SystemChangeEntrySchema>;

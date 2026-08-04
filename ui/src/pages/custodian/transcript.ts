@@ -5,10 +5,12 @@ import type {
 import { html, nothing } from "lit";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { WizardStep } from "../../api/types.ts";
+import { icons } from "../../components/icons.ts";
 import { renderWizardStepControls } from "../../components/wizard-step-controls.ts";
 import { t } from "../../i18n/index.ts";
 import type { MessageGroup } from "../../lib/chat/chat-types.ts";
 import { renderChatDivider } from "../chat/components/chat-divider.ts";
+import { renderMarkdownText } from "../chat/components/chat-message-markdown.ts";
 import { renderMessageGroup } from "../chat/components/chat-message.ts";
 import { renderCustodianQuestionCard } from "./custodian-question-card.ts";
 import type { CustodianStructuredQuestion } from "./structured-question.ts";
@@ -22,6 +24,13 @@ export type CustodianMessage = {
   at: number;
   question: CustodianStructuredQuestion | null;
   step: WizardStep | null;
+  structuredResponse: CustodianStructuredResponse | null;
+  sessionId?: string;
+};
+
+export type CustodianStructuredResponse = {
+  display: string;
+  state: "submitting" | "submitted" | "uncertain";
 };
 
 export function hasUnresolvedCustodianQuestion(
@@ -125,6 +134,8 @@ export function createCustodianTranscriptMessages(
     at: turn.at,
     question: null,
     step: null,
+    structuredResponse: null,
+    ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
   }));
   return { messages, nextMessageId };
 }
@@ -138,6 +149,57 @@ function renderCustodianEarlierDivider(message: CustodianMessage, boundaryAfterI
         timestamp: message.at,
       })
     : nothing;
+}
+
+function hasWizardSupportingInstructions(message: CustodianMessage): boolean {
+  const text = message.text.trim();
+  return text.length > 240 || text.split("\n").length >= 4;
+}
+
+function renderWizardDetails(message: CustodianMessage) {
+  return hasWizardSupportingInstructions(message)
+    ? html`<details class="custodian__wizard-details">
+        <summary>${t("custodian.structured.setupInstructions")}</summary>
+        <div class="custodian__wizard-details-content">
+          ${renderMarkdownText(message.text, false)}
+        </div>
+      </details>`
+    : nothing;
+}
+
+function structuredPrompt(message: CustodianMessage): string {
+  return (
+    message.step?.title ??
+    message.step?.message ??
+    message.question?.question ??
+    t("custodian.structured.response")
+  );
+}
+
+function renderStructuredResponse(message: CustodianMessage) {
+  const response = message.structuredResponse;
+  if (!response) {
+    return nothing;
+  }
+  const status =
+    response.state === "submitting"
+      ? t("custodian.structured.submitting")
+      : response.state === "uncertain"
+        ? t("custodian.structured.confirmationUnavailable")
+        : t("custodian.structured.submitted");
+  return html`<section
+    class="custodian__structured-response"
+    aria-label=${t("custodian.structured.response")}
+    aria-busy=${response.state === "submitting" ? "true" : "false"}
+  >
+    <span class="custodian__structured-response-icon" aria-hidden="true">${icons.check}</span>
+    <span class="custodian__structured-response-copy">
+      <span class="custodian__structured-response-prompt">${structuredPrompt(message)}</span>
+      <strong>${response.display}</strong>
+      <span class="sr-only">${status}</span>
+    </span>
+    ${message.step ? renderWizardDetails(message) : nothing}
+  </section>`;
 }
 
 export function renderCustodianTranscriptEntry(params: {
@@ -159,8 +221,13 @@ export function renderCustodianTranscriptEntry(params: {
 }) {
   const question = params.message.question;
   const step = params.message.step;
+  const hasStructuredResponse = params.message.structuredResponse !== null;
+  const hasActiveQuestion = params.showQuestion && question !== null;
+  const hasActiveWizardStep = params.showWizardStep && step !== null;
+  const showTranscriptMessage =
+    params.message.text && !hasActiveQuestion && !hasActiveWizardStep && !hasStructuredResponse;
   return html`
-    ${params.message.text
+    ${showTranscriptMessage
       ? renderMessageGroup(toCustodianMessageGroup(params.message), {
           showReasoning: false,
           showToolCalls: false,
@@ -169,15 +236,17 @@ export function renderCustodianTranscriptEntry(params: {
         })
       : nothing}
     ${renderCustodianEarlierDivider(params.message, params.boundaryAfterId)}
-    ${params.showQuestion && question
-      ? renderCustodianQuestionCard({
-          question,
-          disabled: params.questionDisabled,
-          onSelect: params.onSelect,
-          onSkip: params.onSkip,
-        })
-      : nothing}
-    ${params.showWizardStep && step
+    ${hasStructuredResponse
+      ? renderStructuredResponse(params.message)
+      : params.showQuestion && question
+        ? renderCustodianQuestionCard({
+            question,
+            disabled: params.questionDisabled,
+            onSelect: params.onSelect,
+            onSkip: params.onSkip,
+          })
+        : nothing}
+    ${hasActiveWizardStep && !hasStructuredResponse
       ? html`<section
           class="custodian__wizard-step"
           aria-label=${step.title ?? step.message ?? "Setup"}
@@ -185,6 +254,7 @@ export function renderCustodianTranscriptEntry(params: {
           ${step.title
             ? html`<strong class="custodian__wizard-title">${step.title}</strong>`
             : nothing}
+          ${renderWizardDetails(params.message)}
           ${renderWizardStepControls({
             step,
             value: params.wizardValue,

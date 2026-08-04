@@ -30,7 +30,6 @@ import {
 } from "../../system-agent/chat-engine.js";
 import { resolveSystemAgentDelegationKey } from "../../system-agent/delegation-session.js";
 import {
-  acknowledgeSystemAgentGreetingDelivery,
   buildSystemAgentGreetingQuestion,
   loadSystemAgentGreetingFacts,
   resolveSystemAgentGreeting,
@@ -39,11 +38,7 @@ import { isSystemAgentInferenceUnavailableError } from "../../system-agent/infer
 import { buildNewAgentWelcome } from "../../system-agent/new-agent-welcome.js";
 import { buildOnboardingWelcome } from "../../system-agent/onboarding-welcome.js";
 import { describeSystemAgentPersistentOperation } from "../../system-agent/operations.js";
-import {
-  appendTranscriptReset,
-  appendTranscriptTurn,
-  readTranscriptTail,
-} from "../../system-agent/transcript-store.js";
+import { appendTranscriptReset, readTranscriptTail } from "../../system-agent/transcript-store.js";
 import { resolveUserPath } from "../../utils.js";
 import { WizardSession } from "../../wizard/session.js";
 import {
@@ -51,12 +46,20 @@ import {
   handlePendingApprovalRequest,
   listVisiblePendingApprovalRequests,
 } from "./approval-shared.js";
+import {
+  captureSystemAgentWizardAction,
+  persistSystemAgentEngineHistory,
+} from "./system-agent-chat-history.js";
 import { sanitizeSystemAgentChatParams } from "./system-agent-chat-params.js";
 import {
   buildSystemAgentChatResult,
   getSystemAgentChatInputError,
   runSystemAgentChatInput,
 } from "./system-agent-chat-turn.js";
+import {
+  acknowledgeDeliveredSystemAgentWelcome,
+  evictOldestSystemAgentSession,
+} from "./system-agent-session-lifecycle.js";
 import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
@@ -73,7 +76,6 @@ import { assertValidParams } from "./validation.js";
 export type SystemAgentChatSession =
   GatewayRequestContext["systemAgentSessions"] extends Map<string, infer Session> ? Session : never;
 
-const MAX_SYSTEM_AGENT_SESSIONS = 8;
 const SYSTEM_AGENT_SEED_HISTORY_LIMIT = 30;
 const DEFAULT_SYSTEM_AGENT_HISTORY_LIMIT = 100;
 const PROVIDER_AUTH_SESSION_TIMEOUT_MS = 25 * 60 * 1000;
@@ -94,15 +96,6 @@ function getSystemAgentSessionQueue(
     systemAgentSessionQueues.set(sessions, queue);
   }
   return queue;
-}
-
-function acknowledgeDeliveredSystemAgentWelcome(session: SystemAgentChatSession): void {
-  const auditSequence = session.welcomeAuditSequence;
-  if (auditSequence === undefined) {
-    return;
-  }
-  acknowledgeSystemAgentGreetingDelivery({ auditSequence });
-  delete session.welcomeAuditSequence;
 }
 
 async function runSystemAgentGatewayTask<T>(task: () => Promise<T>): Promise<T> {
@@ -159,40 +152,6 @@ export async function runExclusiveSystemAgentSetupActivation<T>(
     return await task();
   } finally {
     systemAgentSetupActivationInProgress = false;
-  }
-}
-
-async function evictOldestSession(
-  sessions: Map<string, SystemAgentChatSession>,
-  context: GatewayRequestContext,
-): Promise<void> {
-  if (sessions.size < MAX_SYSTEM_AGENT_SESSIONS) {
-    return;
-  }
-  let oldestKey: string | undefined;
-  let oldestAt = Number.POSITIVE_INFINITY;
-  for (const [key, session] of sessions) {
-    if (session.lastUsedAt < oldestAt) {
-      oldestAt = session.lastUsedAt;
-      oldestKey = key;
-    }
-  }
-  if (oldestKey !== undefined) {
-    const oldest = sessions.get(oldestKey);
-    if (oldest?.pendingApproval) {
-      context.systemAgentApprovalManager?.expire(oldest.pendingApproval.id, "session-evicted");
-    }
-    await oldest?.engine.dispose();
-    sessions.delete(oldestKey);
-  }
-}
-
-function persistEngineHistory(engine: SystemAgentChatSession["engine"], startIndex: number): void {
-  const at = Date.now();
-  for (const turn of engine.historySince(startIndex)) {
-    // Engine history is authoritative here: sensitive user text has already
-    // been replaced by the mask marker before it crosses this boundary.
-    appendTranscriptTurn({ ...turn, at });
   }
 }
 
@@ -668,8 +627,8 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           if (params.reset) {
             appendTranscriptReset();
           }
-          persistEngineHistory(engine, welcomeHistoryStart);
-          await evictOldestSession(sessions, context);
+          persistSystemAgentEngineHistory(engine, welcomeHistoryStart, { sessionId });
+          await evictOldestSystemAgentSession(sessions, context);
           session = {
             engine,
             welcome,
@@ -717,6 +676,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           return;
         }
         const historyStart = session.engine.historyLength();
+        const wizardAction = captureSystemAgentWizardAction(session.engine, params);
         let reply: Awaited<ReturnType<SystemAgentChatEngine["handle"]>>;
         try {
           const turnReply = await runSystemAgentChatInput({
@@ -733,7 +693,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           }
           reply = turnReply;
         } catch (error) {
-          persistEngineHistory(session.engine, historyStart);
+          persistSystemAgentEngineHistory(session.engine, historyStart, { sessionId });
           if (
             error instanceof SystemAgentWizardAnswerError ||
             error instanceof SystemAgentWizardCancelError
@@ -765,7 +725,10 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           );
           return;
         }
-        persistEngineHistory(session.engine, historyStart);
+        persistSystemAgentEngineHistory(session.engine, historyStart, {
+          sessionId,
+          wizardAction,
+        });
         const delegation = params.delegation;
         let proposalId: string | undefined;
         if (delegation) {
