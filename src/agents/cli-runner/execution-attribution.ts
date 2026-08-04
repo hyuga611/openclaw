@@ -6,9 +6,6 @@ export function bindCliRunExecutionAttribution(params: RunCliAgentParams): RunCl
   if (!attribution) {
     return params;
   }
-  if (!attribution.sessionId) {
-    throw new TypeError("CLI execution attribution requires sessionId");
-  }
   const {
     runId: _legacyRunId,
     lifecycleGeneration: _legacyLifecycleGeneration,
@@ -21,7 +18,7 @@ export function bindCliRunExecutionAttribution(params: RunCliAgentParams): RunCl
     ...run,
     runId: attribution.runId,
     lifecycleGeneration: attribution.lifecycleGeneration,
-    sessionId: attribution.sessionId,
+    sessionId: attribution.sessionId ?? _legacySessionId,
     ...(attribution.sessionKey ? { sessionKey: attribution.sessionKey } : {}),
     ...(attribution.agentId ? { agentId: attribution.agentId } : {}),
   };

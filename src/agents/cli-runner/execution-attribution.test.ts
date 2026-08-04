@@ -53,14 +53,21 @@ describe("bindCliRunExecutionAttribution", () => {
     expect(bound.sessionId).toBe("admitted-session");
   });
 
-  it("rejects admitted CLI attribution without its required session id", () => {
+  it("preserves the required CLI session id for sparse admitted attribution", () => {
     const attribution = createAgentExecutionAttribution({
       runId: "admitted-run",
       lifecycleGeneration: "admitted-generation",
     });
 
-    expect(() => bindCliRunExecutionAttribution(createRunParams({ attribution }))).toThrow(
-      "CLI execution attribution requires sessionId",
-    );
+    const bound = bindCliRunExecutionAttribution(createRunParams({ attribution }));
+
+    expect(bound).toMatchObject({
+      attribution,
+      runId: "admitted-run",
+      lifecycleGeneration: "admitted-generation",
+      sessionId: "legacy-session",
+    });
+    expect(bound).not.toHaveProperty("sessionKey");
+    expect(bound).not.toHaveProperty("agentId");
   });
 });
