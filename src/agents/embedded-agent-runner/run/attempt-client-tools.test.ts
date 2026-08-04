@@ -13,6 +13,7 @@ import {
 import type { HookContext } from "../../agent-tools.before-tool-call.js";
 import { applyCodeModeCatalog, createCodeModeTools } from "../../code-mode.js";
 import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
+import type { ExtensionContext } from "../../sessions/index.js";
 import { createStubTool } from "../../test-helpers/agent-tool-stubs.js";
 import {
   applyToolSearchCatalog,
@@ -250,7 +251,7 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       throw new Error("expected direct client tool");
     }
 
-    await directClientTool.execute("client-call", {}, undefined, undefined);
+    await directClientTool.execute("client-call", {}, undefined, undefined, {} as ExtensionContext);
 
     expect(beforeToolCall.mock.calls[0]?.[1]).toMatchObject({
       runId: "admitted-run",
