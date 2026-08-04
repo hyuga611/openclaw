@@ -200,7 +200,7 @@ describe("agent audit lifecycle generations", () => {
     );
   });
 
-  it("upgrades a shipped legacy row before separating later generations", async () => {
+  it("keeps a shipped legacy row immutable while separating later generations", async () => {
     const database = createDatabaseOptions();
     const runId = "run-shipped-legacy-replay";
     const occurredAt = 1_786_000_000_000;
@@ -216,6 +216,8 @@ describe("agent audit lifecycle generations", () => {
         actorType: "agent",
         actorId: "legacy",
         agentId: "legacy",
+        sessionKey: "agent:legacy:main",
+        sessionId: "session-legacy",
         runId,
       },
       database,
@@ -233,6 +235,8 @@ describe("agent audit lifecycle generations", () => {
         data: { phase: "start", startedAt: occurredAt },
         lifecycleGeneration: firstGeneration,
         agentId: "first",
+        sessionKey: "agent:first:main",
+        sessionId: "session-first",
       }),
     );
     const secondGeneration = rotateAgentEventLifecycleGeneration();
@@ -244,9 +248,70 @@ describe("agent audit lifecycle generations", () => {
         data: { phase: "start", startedAt: occurredAt },
         lifecycleGeneration: secondGeneration,
         agentId: "second",
+        sessionKey: "agent:second:main",
+        sessionId: "session-second",
       }),
     );
     await recorder.stop();
+
+    const { db } = openOpenClawStateDatabase(database);
+    expect(
+      db.prepare("SELECT * FROM audit_events WHERE run_id = ? ORDER BY sequence").all(runId),
+    ).toMatchObject([
+      {
+        source_id: legacySourceId,
+        actor_id: "legacy",
+        agent_id: "legacy",
+        session_key: "agent:legacy:main",
+        session_id: "session-legacy",
+        status: "started",
+      },
+      {
+        source_id: `lifecycle:${firstGeneration}:${legacySourceId}`,
+        actor_id: "first",
+        agent_id: "first",
+        session_key: "agent:first:main",
+        session_id: "session-first",
+        status: "started",
+      },
+      {
+        source_id: `lifecycle:${secondGeneration}:${legacySourceId}`,
+        actor_id: "second",
+        agent_id: "second",
+        session_key: "agent:second:main",
+        session_id: "session-second",
+        status: "started",
+      },
+    ]);
+  });
+
+  it("deduplicates a generation-qualified replay against equivalent shipped provenance", () => {
+    const database = createDatabaseOptions();
+    const runId = "run-equivalent-shipped-replay";
+    const occurredAt = 1_786_000_000_000;
+    const legacySourceId = `${runId}:1:${occurredAt}:agent.run.started`;
+    const provenance = {
+      sourceSequence: 1,
+      occurredAt,
+      kind: "agent_run" as const,
+      action: "agent.run.started" as const,
+      status: "started" as const,
+      actorType: "agent" as const,
+      actorId: "coder",
+      agentId: "coder",
+      sessionKey: "agent:coder:main",
+      sessionId: "session-coder",
+      runId,
+    };
+    recordAuditEvent({ ...provenance, sourceId: legacySourceId }, database);
+    recordAuditEvent(
+      {
+        ...provenance,
+        sourceId: `lifecycle:generation-current:${legacySourceId}`,
+        legacySourceId,
+      },
+      database,
+    );
 
     const { db } = openOpenClawStateDatabase(database);
     expect(
@@ -254,10 +319,7 @@ describe("agent audit lifecycle generations", () => {
         .prepare("SELECT source_id FROM audit_events WHERE run_id = ? ORDER BY sequence")
         .all(runId)
         .map((row) => (row as { source_id: string }).source_id),
-    ).toEqual([
-      `lifecycle:${firstGeneration}:${legacySourceId}`,
-      `lifecycle:${secondGeneration}:${legacySourceId}`,
-    ]);
+    ).toEqual([legacySourceId]);
   });
 
   it("does not let a late old-generation terminal reactivate provenance", async () => {

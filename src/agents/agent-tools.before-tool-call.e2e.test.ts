@@ -45,6 +45,7 @@ import { setPluginToolMeta } from "../plugins/tools.js";
 import { createCanonicalFixtureSkill } from "../skills/test-support/test-helpers.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { createAgentExecutionAttribution } from "./agent-execution-attribution.js";
+import { bindToolExecutionAttribution } from "./agent-tools.before-tool-call.attribution.js";
 import {
   getBeforeToolCallFailureDisposition,
   getBeforeToolCallPolicyDiagnosticState,
@@ -2294,14 +2295,16 @@ describe("before_tool_call requireApproval handling", () => {
       return undefined;
     });
 
-    const ctx = {
+    const ctx = bindToolExecutionAttribution(
+      {
+        runId: "run-flat",
+        sessionKey: "session-flat",
+        sessionId: "session-id-flat",
+        agentId: "agent-flat",
+        requester: { senderId: "sender-1" },
+      },
       attribution,
-      runId: "run-flat",
-      sessionKey: "session-flat",
-      sessionId: "session-id-flat",
-      agentId: "agent-flat",
-      requester: { senderId: "sender-1" },
-    };
+    );
     await runBeforeToolCallHook({ toolName: "bash", params: { command: "pwd" }, ctx });
     await runBeforeToolCallHook({ toolName: "bash", params: { command: "pwd" }, ctx });
 

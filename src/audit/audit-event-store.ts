@@ -574,7 +574,7 @@ function pruneAuditEventsAfterInsert(
   auditEventRowCounts.set(db, rowCount);
 }
 
-function adoptLegacyAuditSourceId(db: DatabaseSync, input: AuditEventInput): boolean {
+function hasEquivalentLegacyAuditEvent(db: DatabaseSync, input: AuditEventInput): boolean {
   if (input.kind === "message") {
     return false;
   }
@@ -582,28 +582,33 @@ function adoptLegacyAuditSourceId(db: DatabaseSync, input: AuditEventInput): boo
   if (!legacySourceId || legacySourceId === input.sourceId) {
     return false;
   }
-  const kysely = getAuditKysely(db);
-  const canonicalExists = executeSqliteQueryTakeFirstSync(
+  const legacy = executeSqliteQueryTakeFirstSync(
     db,
-    kysely
+    getAuditKysely(db)
       .selectFrom("audit_events")
-      .select("sequence")
-      .where("source_id", "=", input.sourceId)
+      .selectAll()
+      .where("source_id", "=", legacySourceId)
       .limit(1),
   );
-  if (canonicalExists) {
-    return true;
+  if (!legacy) {
+    return false;
   }
-  // The first generation-aware replay adopts the shipped key in place.
-  // Later generations see no legacy key and retain their distinct identities.
-  const adopted = executeSqliteQuerySync(
-    db,
-    kysely
-      .updateTable("audit_events")
-      .set({ source_id: input.sourceId })
-      .where("source_id", "=", legacySourceId),
+  return (
+    normalizeSqliteNumber(legacy.source_sequence) === input.sourceSequence &&
+    normalizeSqliteNumber(legacy.occurred_at) === input.occurredAt &&
+    legacy.kind === input.kind &&
+    legacy.action === input.action &&
+    legacy.status === input.status &&
+    legacy.error_code === (input.errorCode ?? null) &&
+    legacy.actor_type === input.actorType &&
+    legacy.actor_id === input.actorId &&
+    legacy.agent_id === input.agentId &&
+    legacy.session_key === (input.sessionKey ?? null) &&
+    legacy.session_id === (input.sessionId ?? null) &&
+    legacy.run_id === input.runId &&
+    legacy.tool_call_id === (input.kind === "tool_action" ? (input.toolCallId ?? null) : null) &&
+    legacy.tool_name === (input.kind === "tool_action" ? input.toolName : null)
   );
-  return Number(adopted.numAffectedRows ?? 0n) > 0;
 }
 
 /** Persist one projected event idempotently and prune fixed retention bounds. */
@@ -615,7 +620,9 @@ export function recordAuditEvent(
   try {
     return runOpenClawStateWriteTransaction(({ db }) => {
       countCacheDatabase = db;
-      if (adoptLegacyAuditSourceId(db, input)) {
+      // A shipped generation-less event remains immutable. It suppresses a
+      // versioned replay only when the complete persisted provenance matches.
+      if (hasEquivalentLegacyAuditEvent(db, input)) {
         return undefined;
       }
       const insert = executeSqliteQuerySync(
