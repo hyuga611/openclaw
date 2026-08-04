@@ -202,7 +202,7 @@ describe("audit event persistence", () => {
     expect(listAuditEvents({ database, limit: 10 }).events).toHaveLength(1);
   });
 
-  it("adopts a shipped legacy source key on the first generation-aware replay", () => {
+  it("deduplicates equivalent generation-aware replays against a shipped legacy source key", () => {
     const database = createDatabaseOptions();
     const occurredAt = Date.now();
     const legacySourceId = `run-legacy:1:${occurredAt}:agent.run.started`;
@@ -234,7 +234,7 @@ describe("audit event persistence", () => {
         }),
         database,
       ),
-    ).toBeDefined();
+    ).toBeUndefined();
 
     const { db } = openOpenClawStateDatabase(database);
     expect(
@@ -242,10 +242,7 @@ describe("audit event persistence", () => {
         .prepare("SELECT source_id FROM audit_events ORDER BY sequence")
         .all()
         .map((row) => (row as { source_id: string }).source_id),
-    ).toEqual([
-      `lifecycle:generation-1:${legacySourceId}`,
-      `lifecycle:generation-2:${legacySourceId}`,
-    ]);
+    ).toEqual([legacySourceId]);
   });
 
   it("rejects persisted run lifecycle tuples outside the closed contract", () => {
