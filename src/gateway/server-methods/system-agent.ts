@@ -56,14 +56,14 @@ import {
   runSystemAgentChatInput,
 } from "./system-agent-chat-turn.js";
 import {
+  acknowledgeDeliveredSystemAgentWelcome,
+  evictOldestSystemAgentSession,
+} from "./system-agent-session-lifecycle.js";
+import {
   getSystemAgentSessionQueue,
   resolveSystemAgentHistorySession,
   resolveSystemAgentSessionOwnerKey,
 } from "./system-agent-session-owner.js";
-import {
-  acknowledgeDeliveredSystemAgentWelcome,
-  evictOldestSystemAgentSession,
-} from "./system-agent-session-lifecycle.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
