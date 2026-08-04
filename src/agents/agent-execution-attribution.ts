@@ -34,3 +34,13 @@ export function createAgentExecutionAttribution(params: {
     ...(agentId ? { agentId } : {}),
   });
 }
+
+export function rebindAgentExecutionAttribution(
+  attribution: AgentExecutionAttribution,
+  lifecycleGeneration: string,
+): AgentExecutionAttribution {
+  return createAgentExecutionAttribution({
+    ...attribution,
+    lifecycleGeneration,
+  });
+}
