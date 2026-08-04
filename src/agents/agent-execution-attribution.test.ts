@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAgentExecutionAttribution } from "./agent-execution-attribution.js";
 
 describe("createAgentExecutionAttribution", () => {
-  it("normalizes and freezes host-owned execution correlation", () => {
+  it("preserves required identities, normalizes optional correlation, and freezes the record", () => {
     const attribution = createAgentExecutionAttribution({
       runId: " run-1 ",
       lifecycleGeneration: " generation-1 ",
@@ -12,8 +12,8 @@ describe("createAgentExecutionAttribution", () => {
     });
 
     expect(attribution).toEqual({
-      runId: "run-1",
-      lifecycleGeneration: "generation-1",
+      runId: " run-1 ",
+      lifecycleGeneration: " generation-1 ",
       sessionKey: "agent:main:main",
       sessionId: "session-1",
       agentId: "main",

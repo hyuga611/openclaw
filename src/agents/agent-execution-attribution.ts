@@ -10,11 +10,10 @@ export type AgentExecutionAttribution = Readonly<{
 }>;
 
 function requireAttributionField(value: string, field: "runId" | "lifecycleGeneration"): string {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) {
+  if (!value.trim()) {
     throw new TypeError(`Agent execution attribution requires ${field}`);
   }
-  return normalized;
+  return value;
 }
 
 export function createAgentExecutionAttribution(params: {

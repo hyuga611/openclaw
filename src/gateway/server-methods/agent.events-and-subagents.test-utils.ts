@@ -321,6 +321,50 @@ describe("gateway agent handler", () => {
     expect(Object.isFrozen(runContext.attribution)).toBe(true);
   });
 
+  it("preserves the admitted idempotency key exactly in execution attribution", async () => {
+    primeMainAgentRun({ cfg: mocks.loadConfigReturn });
+    mocks.registerAgentRunContext.mockClear();
+    const runId = " padded-agent-run ";
+
+    await invokeAgent({
+      message: "preserve exact run identity",
+      agentId: "main",
+      sessionKey: "agent:main:main",
+      idempotencyKey: runId,
+    });
+
+    await waitForAgentCommandCall();
+    expect(mockCallArg(mocks.registerAgentRunContext, 0, 0)).toBe(runId);
+    expect(mockCallArg(mocks.registerAgentRunContext, 0, 1)).toMatchObject({
+      attribution: { runId },
+    });
+  });
+
+  it("rejects blank idempotency keys before registering run state", async () => {
+    const context = makeContext();
+    const respond = vi.fn();
+    mocks.registerAgentRunContext.mockClear();
+    mocks.agentCommand.mockClear();
+
+    await invokeAgent(
+      {
+        message: "reject blank run identity",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        idempotencyKey: " \t ",
+      },
+      { context, respond },
+    );
+
+    expectRespondError(respond, {
+      code: ErrorCodes.INVALID_REQUEST,
+      message: "idempotencyKey must not be blank",
+    });
+    expect(context.chatAbortControllers.size).toBe(0);
+    expect(mocks.registerAgentRunContext).not.toHaveBeenCalled();
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
   it("allows backend internal runs without a persisted session row", async () => {
     const sessionKey = "agent:main:internal:ephemeral";
     mocks.loadSessionEntry.mockReturnValue({
